@@ -3,52 +3,31 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 const { json, urlencoded } = require('body-parser');
+const validUrl = require('valid-url');
 
+
+const ERROR_RESPONSE = { error: 'invalid url' };
+const ERROR_404_MESSAGE = 'Not found';
+const PARSED_URLS_STORAGE = [null];
 
 // Basic Configuration
 const port = process.env.PORT || 3000;
-const PARSED_URLS_STORAGE = [null];
-const ERROR_RESPONSE = { error: 'invalid url' };
-const ERROR_404_MESSAGE = 'Not found';
 
 app.use(cors());
 app.use(json());
 app.use(urlencoded({ extended: false }));
 app.use('/public', express.static(`${process.cwd()}/public`));
 
-const isValidUrlBodyParameterMiddleware = ({ body: { url } }, res, next) => {
-  try {
-    const isValidBodyUrl = url !== undefined && url !== null && url !== '' && new URL(url);
-
-    if (!isValidBodyUrl) {
+const validateUrlMiddleware = (req, res, next) => {
+  if (!validUrl.isWebUri(req.body.url)) {
       res.json(ERROR_RESPONSE);
-    }
-
-    next();
-  } catch (err) {
-    res.json(ERROR_RESPONSE);
-  }
-}
-
-const isAlreadyRegisteredUrlInStorageMiddleware = ({ body: { url } }, res, next) => {
-  if (!PARSED_URLS_STORAGE.includes(url)) {
-    PARSED_URLS_STORAGE.push(url);
   }
 
   next();
-}
+};
 
-const isValidShortUrlParamMiddleware = ({ params: { short_url } }, res, next) => {
-  const isValidShortUrlParam = typeof +short_url === 'number' && !isNaN(+short_url) && short_url !== '0' && +short_url !== 0;
-
-  if (!isValidShortUrlParam) {
-    res.json(ERROR_RESPONSE);
-  }
-
-  next();
-}
-
-const isValidUrlStoredInStorageMiddleware = ({ params: { short_url } }, res, next) => {
+const validateStoredShorturl = (req, res, next) => {
+  const { short_url } = req.params;
   const isValidUrlStoredInStorage = PARSED_URLS_STORAGE[+short_url] !== undefined;
 
   if (!isValidUrlStoredInStorage) {
@@ -58,25 +37,55 @@ const isValidUrlStoredInStorageMiddleware = ({ params: { short_url } }, res, nex
   next();
 }
 
-const postApiShorturlHandler = ({ body: { url } }, res) => {
+const validateShorturlMiddleware = (req, res, next) => {
+  const { short_url } = req.params;
+  const isValidShortUrlParam = typeof +short_url === 'number' && !isNaN(+short_url) && short_url !== '0' && +short_url !== 0;
+
+  if (!isValidShortUrlParam) {
+      res.json(ERROR_RESPONSE);
+  }
+
+  next();
+}
+
+const storeUniqueUrlMiddleware = (req, res, next) => {
+  const { url } = req.body;
+
+  if (!PARSED_URLS_STORAGE.includes(url)) {
+      PARSED_URLS_STORAGE.push(url);
+  }
+
+  next();
+}
+
+const postShorturlHandler = (req, res) => {
+  const { url } = req.body;
+  
   res.json({
     original_url: url,
     short_url: PARSED_URLS_STORAGE.indexOf(url)
   });
 }
 
-const getApiShorturlByShorturlHandler = ({ params: { short_url } }, res) => { res.redirect(PARSED_URLS_STORAGE[+short_url]); }
+const getWildCardHandler = (req, res) => { 
+  res.status(404).send(ERROR_404_MESSAGE);
+}
 
-const getAnyRequestHandler = (req, res) => { res.status(404).send(ERROR_404_MESSAGE); }
+const getShorturlByCodeHandler = (req, res) => { 
+  res.redirect(PARSED_URLS_STORAGE[+req.params.short_url]);
+}
 
-app.get('/', function (req, res) {
+const getRootHandler = (req, res) => {
   res.sendFile(process.cwd() + '/views/index.html');
-});
+}
 
-app.post('/api/shorturl', isValidUrlBodyParameterMiddleware, isAlreadyRegisteredUrlInStorageMiddleware, postApiShorturlHandler);
-app.get('/api/shorturl/:short_url', isValidShortUrlParamMiddleware, isValidUrlStoredInStorageMiddleware, getApiShorturlByShorturlHandler)
-app.get('*', getAnyRequestHandler)
+app.get('/', getRootHandler);
 
+
+app.post('/api/shorturl', validateUrlMiddleware, storeUniqueUrlMiddleware, postShorturlHandler);
+app.get('/api/shorturl/:short_url', validateShorturlMiddleware, validateStoredShorturl, getShorturlByCodeHandler)
+
+app.get('*', getWildCardHandler)
 
 app.listen(port, function () {
   console.log(`Listening on port ${port}`);
