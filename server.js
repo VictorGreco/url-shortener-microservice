@@ -18,6 +18,17 @@ app.use(json());
 app.use(urlencoded({ extended: false }));
 app.use('/public', express.static(`${process.cwd()}/public`));
 
+
+const loggerMiddleware = (req, res, next) => {
+  const method = req.method;
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  const path = req.originalUrl;
+  const value = req.body.url || req.params.short_url;
+
+  console.log(`${method} - ${ip} / ${path} - ${value}`);
+  next();
+}
+
 const validateUrlMiddleware = (req, res, next) => {
   if (!validUrl.isWebUri(req.body.url)) {
       res.json(ERROR_RESPONSE);
@@ -82,8 +93,8 @@ const getRootHandler = (req, res) => {
 app.get('/', getRootHandler);
 
 
-app.post('/api/shorturl', validateUrlMiddleware, storeUniqueUrlMiddleware, postShorturlHandler);
-app.get('/api/shorturl/:short_url', validateShorturlMiddleware, validateStoredShorturl, getShorturlByCodeHandler)
+app.post('/api/shorturl', loggerMiddleware, validateUrlMiddleware, storeUniqueUrlMiddleware, postShorturlHandler);
+app.get('/api/shorturl/:short_url', loggerMiddleware, validateShorturlMiddleware, validateStoredShorturl, getShorturlByCodeHandler)
 
 app.get('*', getWildCardHandler)
 
