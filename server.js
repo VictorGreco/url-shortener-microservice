@@ -4,9 +4,25 @@ const cors = require('cors');
 const app = express();
 const { json, urlencoded } = require('body-parser');
 const validUrl = require('valid-url');
+const mongoose = require('mongoose');
+const { Schema } = mongoose;
 
 
-const ERROR_RESPONSE = { error: 'invalid url' };
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+
+const shorurlSchema = new Schema({
+  original_url: {
+    type: String,
+    required: true
+  },
+  short_url: {
+    type: Number,
+    required: true
+  }
+})
+
+const Shorturl = mongoose.model('Shorturl', shorurlSchema);
+
 const ERROR_404_MESSAGE = 'Not found';
 const PARSED_URLS_STORAGE = [null];
 
@@ -31,59 +47,57 @@ const loggerMiddleware = (req, res, next) => {
 
 const validateUrlMiddleware = (req, res, next) => {
   if (!validUrl.isWebUri(req.body.url)) {
-      res.json(ERROR_RESPONSE);
+      res.status(401).json({ error: 'invalid url' });
   }
 
   next();
 };
 
-const validateStoredShorturl = (req, res, next) => {
-  const { short_url } = req.params;
-  const isValidUrlStoredInStorage = PARSED_URLS_STORAGE[+short_url] !== undefined;
-
-  if (!isValidUrlStoredInStorage) {
-    res.json(ERROR_RESPONSE);
-  }
-
-  next();
-}
-
-const validateShorturlMiddleware = (req, res, next) => {
-  const { short_url } = req.params;
-  const isValidShortUrlParam = typeof +short_url === 'number' && !isNaN(+short_url) && short_url !== '0' && +short_url !== 0;
-
-  if (!isValidShortUrlParam) {
-      res.json(ERROR_RESPONSE);
-  }
-
-  next();
-}
-
-const storeUniqueUrlMiddleware = (req, res, next) => {
+const storeUniqueUrlMiddleware = async (req, res, next) => {
   const { url } = req.body;
 
-  if (!PARSED_URLS_STORAGE.includes(url)) {
-      PARSED_URLS_STORAGE.push(url);
+  const shorturlDocuments = await Shorturl.find();
+  const shorturlItem = await Shorturl.find({ original_url: url });
+
+  if (shorturlItem.length === 0) {
+      const newShorturl = new Shorturl({ original_url: url, short_url: shorturlDocuments.length + 1 });
+
+      await newShorturl.save();
   }
 
   next();
 }
 
-const postShorturlHandler = (req, res) => {
+const validateStoredShorturl = async (req, res, next) => {
+  const { short_url } = req.params;
+  const shorturlItem = await Shorturl.find({ short_url });
+
+  if (shorturlItem.length === 0) {
+    res.json({ error: 'invalid url' });
+  }
+
+  next();
+}
+
+const postShorturlHandler = async (req, res) => {
   const { url } = req.body;
-  
-  res.json({
-    original_url: url,
-    short_url: PARSED_URLS_STORAGE.indexOf(url)
-  });
+
+  const shorturlItem = await Shorturl.find({ original_url: url });
+
+  const { original_url, short_url } = shorturlItem[0];
+
+  res.json({  });
 }
 
 const getWildCardHandler = (req, res) => { 
   res.status(404).send(ERROR_404_MESSAGE);
 }
 
-const getShorturlByCodeHandler = (req, res) => { 
-  res.redirect(PARSED_URLS_STORAGE[+req.params.short_url]);
+const getShorturlByCodeHandler = async(req, res) => {
+  const { short_url } = req.params
+  const shorturlItem = await Shorturl.find({ short_url });
+
+  res.redirect(shorturlItem[0].original_url);
 }
 
 const getRootHandler = (req, res) => {
@@ -93,8 +107,8 @@ const getRootHandler = (req, res) => {
 app.get('/', getRootHandler);
 
 
-app.post('/api/shorturl', loggerMiddleware, validateUrlMiddleware, storeUniqueUrlMiddleware, postShorturlHandler);
-app.get('/api/shorturl/:short_url', loggerMiddleware, validateShorturlMiddleware, validateStoredShorturl, getShorturlByCodeHandler)
+app.post('/api/shorturl', validateUrlMiddleware, storeUniqueUrlMiddleware, postShorturlHandler);
+app.get('/api/shorturl/:short_url', validateStoredShorturl, getShorturlByCodeHandler)
 
 app.get('*', getWildCardHandler)
 
