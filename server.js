@@ -30,32 +30,46 @@ app.use(json());
 app.use(urlencoded({ extended: false }));
 app.use('/public', express.static(`${process.cwd()}/public`));
 
+const loggerMiddleware = (req, res, next) => {
+  console.log(`${req.method} - ${req.url} - ${req.body.url || req.params.short_url}`);
+
+  next();
+}
+
+const resJsonError = (res) => res.json({ error: 'invalid url' });
+const resJsonSuccessfull = (res, { original_url, short_url }) => res.json({ original_url, short_url });
+const resRedirect = (res, location) =>  res.redirect(location);
+const getAllShorturl = async() => await Shorturl.find();
+const getShorturlByOriginalUrl = async(original_url) => await Shorturl.find({ original_url });
+const getShorturlByShortUrl = async(short_url) => await Shorturl.find({ short_url });
+const createShorturlAndSave = async (original_url, short_url) => {
+  const newShorturl = new Shorturl({ original_url, short_url });
+
+  await newShorturl.save();
+};
+
+const saveShorturlIfNotFound = async(original_url) => {
+  const shorturlItem = await getShorturlByOriginalUrl(original_url);
+
+  if (shorturlItem.length === 0) {
+    const shorturlDocuments = await getAllShorturl();
+    
+    await createShorturlAndSave(original_url, shorturlDocuments.length + 1)
+  }
+}
+
 const postShorturlHandler = async (req, res) => {
   const { url } = req.body;
-  const saveShorturlIfNotFound = async (original_url) => {
-    const shorturlDocuments = await Shorturl.find();
-    const shorturlItem = await Shorturl.find({ original_url });
 
-    if (shorturlItem.length === 0) {
-      const newShorturl = new Shorturl({
-        original_url: url,
-        short_url: shorturlDocuments.length + 1
-      });
-
-      await newShorturl.save();
-    }
-  }
-
-  if (!validUrl.isWebUri(req.body.url)) {
-    res.json({ error: 'invalid url' });
+  if (!validUrl.isWebUri(url)) {
+    resJsonError(res);
 
   } else {
     await saveShorturlIfNotFound(url);
 
-    const shorturlItem = await Shorturl.find({ original_url: url });
-    const { original_url, short_url } = shorturlItem[0];
+    const shorturlItem = await getShorturlByOriginalUrl(url);
 
-    res.json({ original_url, short_url });
+    resJsonSuccessfull(res, shorturlItem[0]);
   }
 }
 
@@ -63,17 +77,12 @@ const getShorturlByCodeHandler = async (req, res) => {
   const { short_url } = req.params
 
   if (isNaN(+short_url)) {
-    res.json({ error: 'invalid url' });
+    resJsonError(res)
 
   } else {
-    const shorturlItem = await Shorturl.find({ short_url });
+    const shorturlItem = await getShorturlByShortUrl(short_url);
 
-    if (shorturlItem.length === 0) {
-      res.json({ error: 'invalid url' });
-
-    } else {
-      res.redirect(shorturlItem[0].original_url);
-    }
+    shorturlItem.length === 0 ? resJsonError(res) : resRedirect(res, shorturlItem[0].original_url);
   }
 }
 
@@ -82,8 +91,8 @@ app.get('/', (req, res) => {
 });
 
 
-app.post('/api/shorturl', postShorturlHandler);
-app.get('/api/shorturl/:short_url', getShorturlByCodeHandler)
+app.post('/api/shorturl', loggerMiddleware, postShorturlHandler);
+app.get('/api/shorturl/:short_url', loggerMiddleware, getShorturlByCodeHandler)
 
 app.get('*', (req, res) => {
   res.status(404).send('Not found');
