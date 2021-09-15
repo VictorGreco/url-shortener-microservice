@@ -30,81 +30,64 @@ app.use(json());
 app.use(urlencoded({ extended: false }));
 app.use('/public', express.static(`${process.cwd()}/public`));
 
-const validateUrlMiddleware = (req, res, next) => {
-  if (!validUrl.isWebUri(req.body.url)) {
-      res.status(401).json({ error: 'invalid url' });
-  }
-
-  next();
-};
-
-const storeUniqueUrlMiddleware = async (req, res, next) => {
+const postShorturlHandler = async (req, res) => {
   const { url } = req.body;
+  const saveShorturlIfNotFound = async (original_url) => {
+    const shorturlDocuments = await Shorturl.find();
+    const shorturlItem = await Shorturl.find({ original_url });
 
-  const shorturlDocuments = await Shorturl.find();
-  const shorturlItem = await Shorturl.find({ original_url: url });
-
-  if (shorturlItem.length === 0) {
-      const newShorturl = new Shorturl({ original_url: url, short_url: shorturlDocuments.length + 1 });
+    if (shorturlItem.length === 0) {
+      const newShorturl = new Shorturl({
+        original_url: url,
+        short_url: shorturlDocuments.length + 1
+      });
 
       await newShorturl.save();
+    }
   }
 
-  next();
+  if (!validUrl.isWebUri(req.body.url)) {
+    res.json({ error: 'invalid url' });
+
+  } else {
+    await saveShorturlIfNotFound(url);
+
+    const shorturlItem = await Shorturl.find({ original_url: url });
+    const { original_url, short_url } = shorturlItem[0];
+
+    res.json({ original_url, short_url });
+  }
 }
 
-const validateStoredShorturl = async (req, res, next) => {
-  const { short_url } = req.params;
+const getShorturlByCodeHandler = async (req, res) => {
+  const { short_url } = req.params
 
   if (isNaN(+short_url)) {
     res.json({ error: 'invalid url' });
+
+  } else {
+    const shorturlItem = await Shorturl.find({ short_url });
+
+    if (shorturlItem.length === 0) {
+      res.json({ error: 'invalid url' });
+
+    } else {
+      res.redirect(shorturlItem[0].original_url);
+    }
   }
-
-  const shorturlItem = await Shorturl.find({ short_url });
-
-  if (shorturlItem.length === 0) {
-    res.json({ error: 'invalid url' });
-  }
-
-  next();
 }
 
-const postShorturlHandler = async (req, res) => {
-  const { url } = req.body;
-
-  const shorturlItem = await Shorturl.find({ original_url: url });
-
-  const { original_url, short_url } = shorturlItem[0];
-
-  res.json({  original_url, short_url });
-}
-
-const getWildCardHandler = (req, res) => { 
-  res.status(404).send('Not found');
-}
-
-const getShorturlByCodeHandler = async(req, res) => {
-  const { short_url } = req.params
-  const shorturlItem = await Shorturl.find({ short_url });
-
-  if (shorturlItem.length === 0) {
-    res.json({ error: 'invalid url' })
-  }
-
-  res.redirect(shorturlItem[0].original_url);
-}
-
-const getRootHandler = (req, res) => {
+app.get('/', (req, res) => {
   res.sendFile(process.cwd() + '/views/index.html');
-}
-
-app.get('/', getRootHandler);
+});
 
 
-app.post('/api/shorturl', validateUrlMiddleware, storeUniqueUrlMiddleware, postShorturlHandler);
-app.get('/api/shorturl/:short_url', validateStoredShorturl, getShorturlByCodeHandler)
+app.post('/api/shorturl', postShorturlHandler);
+app.get('/api/shorturl/:short_url', getShorturlByCodeHandler)
 
-app.get('*', getWildCardHandler)
+app.get('*', (req, res) => {
+  res.status(404).send('Not found');
+})
 
 app.listen(port, function () {
   console.log(`Listening on port ${port}`);
